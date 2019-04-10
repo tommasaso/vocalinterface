@@ -7,8 +7,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
 
-object QueryKT {
-    private val textToSpeechClient: TextToSpeechClient? = null
+object Query {
 
     fun print(queryResult: QueryResult) {
         println("====================")
@@ -18,7 +17,7 @@ object QueryKT {
         System.out.format("Fulfillment Text: '%s'\n", queryResult.fulfillmentText)
     }
 
-    fun synthesize(queryResult: QueryResult, textToSpeechClient: TextToSpeechClient) {
+    fun synthesize(queryResult: QueryResult, textToSpeechClient: TextToSpeechClient?) {
         try {
             // Set the text input to be synthesized
             val input = SynthesisInput.newBuilder()
@@ -40,14 +39,14 @@ object QueryKT {
 
             // Perform the text-to-speech request on the text input with the selected voice parameters and
             // audio file type
-            val responseTTS = textToSpeechClient.synthesizeSpeech(input, voice, audioConfig)
+            val responseTTS = textToSpeechClient?.synthesizeSpeech(input, voice, audioConfig)
 
             // Get the audio contents from the response
 
-            val audioContents = responseTTS.audioContent
+            val audioContents = responseTTS?.audioContent
 
             val out = FileOutputStream("output.wav")
-            out.write(audioContents.toByteArray())
+            out.write(audioContents?.toByteArray())
             val file = File(System.getProperty("user.dir") + "/output.wav")
 
             val stream = AudioSystem.getAudioInputStream(file)

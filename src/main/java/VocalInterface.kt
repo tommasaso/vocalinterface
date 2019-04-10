@@ -26,14 +26,20 @@ import com.google.cloud.dialogflow.v2.SessionName
 import com.google.cloud.dialogflow.v2.SessionsClient
 import com.google.cloud.dialogflow.v2.TextInput.Builder
 import com.google.cloud.dialogflow.v2.EventInput
+import com.google.auth.oauth2.GoogleCredentials
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.*
 import com.google.cloud.dialogflow.v2beta1.EventInputOrBuilder
+
 // Imports the Google Cloud client library
 import com.google.cloud.texttospeech.v1.SynthesizeSpeechResponse
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.io.*
 
-object VocalInterface {
+class VocalInterface {
     // Creating shared object
     private val sharedQueue = LinkedBlockingQueue<ByteArray>()
     private var targetDataLine: TargetDataLine? = null
@@ -46,16 +52,6 @@ object VocalInterface {
     private var client: SpeechClient? = null
     private var session: SessionName? = null
     private var eventName = ""
-
-    @JvmStatic
-    fun main() {
-        try {
-            infiniteStreamingRecognize()
-        } catch (e: Exception) {
-            println("Exception caught: $e")
-        }
-
-    }
 
     /** Performs infinite streaming speech recognition  */
     @Throws(Exception::class)
@@ -78,7 +74,6 @@ object VocalInterface {
                     } catch (e: InterruptedException) {
                         println("Microphone input buffering interrupted : " + e.message)
                     }
-
                 }
             }
         }
@@ -106,12 +101,11 @@ object VocalInterface {
                         } catch (e: Exception) {
                             println(e)
                         }
-
                         speech = false
-
                         textDetected = ""
+
                     } else if (!eventName.isEmpty()) {
-                        val event = EventInput.newBuilder().setName("test_event").setLanguageCode("en-US").build()
+                        val event = EventInput.newBuilder().setName(eventName+"_event").setLanguageCode("en-US").build()
 
                         val queryInput = QueryInput.newBuilder().setEvent(event).build()
 
@@ -128,7 +122,6 @@ object VocalInterface {
                         } catch (e: Exception) {
                             println(e)
                         }
-
                         speech = false
                         eventName = ""
                     }
@@ -140,6 +133,59 @@ object VocalInterface {
         val micThread = Thread(micrunnable)
         val responsereader = responseReader()
         val readerThread = Thread(responsereader)
+
+        val serviceAccount = FileInputStream("/Users/tommasaso/Documents/Tesi/IntalliJ/vocalinterface-firebase-adminsdk-3ycvz-afbeeece70.json")
+        val options = FirebaseOptions.Builder()
+            .setCredentials(GoogleCredentials.fromStream(serviceAccount))
+            .setDatabaseUrl("https://vocalinterface.firebaseio.com")
+            .build()
+        FirebaseApp.initializeApp(options)
+
+        val database = FirebaseDatabase.getInstance()
+        val myRef = database.getReference()
+
+
+        myRef.child("/events/confirmMedicineTaken").addValueEventListener(object :ValueEventListener{
+            override fun onDataChange(dataSnapshot: DataSnapshot) {
+                if (dataSnapshot.getValue() == true && eventName == ""){
+                    eventName = dataSnapshot.key;
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                println("Error on event listener: confirmMedicineTaken")
+            }
+        })
+        myRef.child("/events/drugReminderFullStomach").addValueEventListener(object :ValueEventListener{
+            override fun onDataChange(dataSnapshot: DataSnapshot) {
+                if (dataSnapshot.getValue() == true && eventName == ""){
+                    eventName = dataSnapshot.key;
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                println("Error on event listener: drugReminderFullStomach")
+            }
+        })
+        myRef.child("/events/proposingActivity").addValueEventListener(object :ValueEventListener{
+            override fun onDataChange(dataSnapshot: DataSnapshot) {
+                if (dataSnapshot.getValue() != "" && eventName == ""){
+                    eventName = dataSnapshot.key;
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                println("Error on event listener: proposingActivity")
+            }
+        })
+        myRef.child("/events/proposingNewActivity").addValueEventListener(object :ValueEventListener{
+            override fun onDataChange(dataSnapshot: DataSnapshot) {
+                if (dataSnapshot.getValue() != "" && eventName == ""){
+                    eventName = dataSnapshot.key;
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                println("Error on event listener: proposingActivity")
+            }
+        })
+
 
         var responseObserver: ResponseObserver<StreamingRecognizeResponse>? = null
         try {
@@ -253,3 +299,12 @@ object VocalInterface {
     }
 }
 
+
+fun main(args : Array<String>){
+    try {
+        VocalInterface().infiniteStreamingRecognize();
+    } catch (e: Exception) {
+        println("Exception caught: $e")
+    }
+
+}

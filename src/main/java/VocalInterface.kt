@@ -4,39 +4,46 @@ import com.google.api.gax.rpc.StreamController
 import com.google.cloud.dialogflow.v2.*
 import com.google.cloud.speech.v1.RecognitionConfig
 import com.google.cloud.speech.v1.SpeechClient
+import com.google.cloud.speech.v1.SpeechRecognitionAlternative
 import com.google.cloud.speech.v1.StreamingRecognitionConfig
+import com.google.cloud.speech.v1.StreamingRecognitionResult
 import com.google.cloud.speech.v1.StreamingRecognizeRequest
 import com.google.cloud.speech.v1.StreamingRecognizeResponse
 import com.google.cloud.texttospeech.v1.*
+import com.google.cloud.texttospeech.v1.AudioEncoding
 import com.google.protobuf.ByteString
+import java.util.ArrayList
+import java.util.concurrent.BlockingQueue
 import java.util.concurrent.LinkedBlockingQueue
 import javax.sound.sampled.*
 import javax.sound.sampled.DataLine.Info
+
+import com.google.api.gax.rpc.ApiStreamObserver
+import com.google.api.gax.core.*
 import com.google.cloud.dialogflow.v2.QueryInput
+import com.google.cloud.dialogflow.v2.QueryResult
 import com.google.cloud.dialogflow.v2.SessionName
 import com.google.cloud.dialogflow.v2.SessionsClient
+import com.google.cloud.dialogflow.v2.TextInput.Builder
 import com.google.cloud.dialogflow.v2.EventInput
 import com.google.auth.oauth2.GoogleCredentials
-import com.google.cloud.firestore.Firestore
-import com.google.cloud.firestore.FirestoreOptions
-import com.google.cloud.texttospeech.v1.AudioEncoding
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
-import com.google.firebase.cloud.StorageClient
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
+import com.google.cloud.dialogflow.v2beta1.EventInputOrBuilder
 
+// Imports the Google Cloud client library
+import com.google.cloud.texttospeech.v1.SynthesizeSpeechResponse
+import java.io.FileOutputStream
+import java.io.OutputStream
 import java.io.*
-import java.net.ServerSocket
-import java.net.Socket
-import java.net.URL
-
-var firestoreDB: Firestore? = null
-var database: FirebaseDatabase? = null
 
 class VocalInterface {
     // Creating shared object
     private val sharedQueue = LinkedBlockingQueue<ByteArray>()
     private var targetDataLine: TargetDataLine? = null
+    private val BYTES_PER_BUFFER = 6400 // buffer size in bytes
     @Volatile var speech: Boolean = false
     private var clientStream: ClientStream<StreamingRecognizeRequest>? = null
     @Volatile private var textDetected = ""
@@ -45,43 +52,28 @@ class VocalInterface {
     private var client: SpeechClient? = null
     private var session: SessionName? = null
     private var eventName = ""
-    private var userId = "/installation_test_name/5fe6b3ba-2767-4669-ae69-6fdc402e695e"
-    private var sotaIP = "130.251.13.177"
-    private var sotaPort = 9000
 
     /** Performs infinite streaming speech recognition  */
     @Throws(Exception::class)
     fun infiniteStreamingRecognize() {
 
         // Microphone Input buffering
-        class MicBuffer(var client:Socket?) : Runnable {
+        class MicBuffer : Runnable {
             override fun run() {
-
-                // Create the DataInputStream and AudioFormat necessary to acquire the audio from the microphone
-                val socketIn = DataInputStream(client?.getInputStream())
-                val format = AudioFormat(16000f, 16, 1, true, false)
-
-                // Set the system information to read from the microphone audio stream
-                val dataLineInfo = DataLine.Info(SourceDataLine::class.java, format)
-                val speakers = AudioSystem.getLine(dataLineInfo) as SourceDataLine
-
-                // Open the channel with the microphone and start to acquire information from it
-                speakers.open(format)
-                speakers.start()
-
-                // Now in loop the audio it's catch by the microphone and sent to Sota with a Socke connection
-                while (true) {
-                    val data = ByteArray(6400)
-                    val bais = ByteArrayInputStream(data)
-                    val ais = AudioInputStream(bais, format, data.size.toLong())
-                    var bytesRead = ais.read(data)
-                    if (bytesRead != -1) {
-                        socketIn.readFully(data, 0, data.size)
-                        speakers.write(data, 0, data.size)
+                println("Start speaking...Press Ctrl-C to stop")
+                targetDataLine!!.start()
+                val data = ByteArray(BYTES_PER_BUFFER)
+                while (targetDataLine!!.isOpen) {
+                    try {
+                        val numBytesRead = targetDataLine!!.read(data, 0, data.size)
+                        if (numBytesRead <= 0 && targetDataLine!!.isOpen) {
+                            continue
+                        }
                         sharedQueue.put(data.clone())
+                        //System.out.println("data = "+data.clone());
+                    } catch (e: InterruptedException) {
+                        println("Microphone input buffering interrupted : " + e.message)
                     }
-                    ais.close()
-                    bais.close()
                 }
             }
         }
@@ -104,9 +96,8 @@ class VocalInterface {
                         val queryResult = responseD.queryResult
 
                         try {
-                            printQuery(queryResult)
-                            //Query.synthesize(queryResult, textToSpeechClient)
-                            synthesizeAndSend(queryResult, textToSpeechClient)
+                            Query.print(queryResult)
+                            Query.synthesize(queryResult, textToSpeechClient)
                         } catch (e: Exception) {
                             println(e)
                         }
@@ -125,10 +116,9 @@ class VocalInterface {
                         val queryResult = responseD.queryResult
 
                         try {
-                            printQuery(queryResult)
+                            Query.print(queryResult)
                             speech = true
-                            //Query.synthesize(queryResult, textToSpeechClient)
-                            synthesizeAndSend(queryResult, textToSpeechClient)
+                            Query.synthesize(queryResult, textToSpeechClient)
                         } catch (e: Exception) {
                             println(e)
                         }
@@ -138,45 +128,24 @@ class VocalInterface {
                 }
             }
         }
-
-        initDB()
-        publicIP()
-
-        //init
-        var noConncted = true
-        var clientSocket:Socket? = null
-
-        //wait until the socket connection is established
-        while(noConncted) {
-            try {
-                clientSocket = Socket(sotaIP, sotaPort)
-                noConncted = false
-                println("Socket connection established")
-            } catch (e: Exception) {
-                Thread.sleep(2500)
-                println("Wainitg for the the socket connection")
-            }
-        }
-
         // Creating microphone input buffer thread
-        val micrunnable = MicBuffer(clientSocket)
+        val micrunnable = MicBuffer()
         val micThread = Thread(micrunnable)
         val responsereader = responseReader()
         val readerThread = Thread(responsereader)
 
-
-        // Credential definition
-        /*val serviceAccount = FileInputStream("/Users/tommasaso/Documents/Tesi/IntalliJ/vocalinterface-firebase-adminsdk-3ycvz-afbeeece70.json")
+        val serviceAccount = FileInputStream("/Users/tommasaso/Documents/Tesi/IntalliJ/vocalinterface-firebase-adminsdk-3ycvz-afbeeece70.json")
         val options = FirebaseOptions.Builder()
             .setCredentials(GoogleCredentials.fromStream(serviceAccount))
             .setDatabaseUrl("https://vocalinterface.firebaseio.com")
             .build()
         FirebaseApp.initializeApp(options)
 
-        val database = FirebaseDatabase.getInstance()*/
-        val myRef = database!!.getReference()
+        val database = FirebaseDatabase.getInstance()
+        val myRef = database.getReference()
 
-        myRef.child(userId+"/events/confirmMedicineTaken").addValueEventListener(object :ValueEventListener{
+
+        myRef.child("/events/confirmMedicineTaken").addValueEventListener(object :ValueEventListener{
             override fun onDataChange(dataSnapshot: DataSnapshot) {
                 if (dataSnapshot.getValue() == true && eventName == ""){
                     eventName = dataSnapshot.key;
@@ -186,7 +155,7 @@ class VocalInterface {
                 println("Error on event listener: confirmMedicineTaken")
             }
         })
-        myRef.child(userId+"/events/drugReminderFullStomach").addValueEventListener(object :ValueEventListener{
+        myRef.child("/events/drugReminderFullStomach").addValueEventListener(object :ValueEventListener{
             override fun onDataChange(dataSnapshot: DataSnapshot) {
                 if (dataSnapshot.getValue() == true && eventName == ""){
                     eventName = dataSnapshot.key;
@@ -196,7 +165,7 @@ class VocalInterface {
                 println("Error on event listener: drugReminderFullStomach")
             }
         })
-        myRef.child(userId+"/events/proposingActivity").addValueEventListener(object :ValueEventListener{
+        myRef.child("/events/proposingActivity").addValueEventListener(object :ValueEventListener{
             override fun onDataChange(dataSnapshot: DataSnapshot) {
                 if (dataSnapshot.getValue() != "" && eventName == ""){
                     eventName = dataSnapshot.key;
@@ -206,25 +175,23 @@ class VocalInterface {
                 println("Error on event listener: proposingActivity")
             }
         })
-        myRef.child(userId+"/events/proposingNewActivity/changeIdea").addValueEventListener(object :ValueEventListener{
+        myRef.child("/events/proposingNewActivity").addValueEventListener(object :ValueEventListener{
             override fun onDataChange(dataSnapshot: DataSnapshot) {
-                //if (dataSnapshot.getValue().toString().toInt() > 0 && eventName == ""){
-                if (dataSnapshot.getValue() == true && eventName == ""){
+                if (dataSnapshot.getValue() != "" && eventName == ""){
                     eventName = dataSnapshot.key;
-                    println("eventName: "+eventName);
                 }
             }
             override fun onCancelled(error: DatabaseError) {
-                println("Error on event listener: changeIdea")
+                println("Error on event listener: proposingActivity")
             }
         })
 
-        var responseObserver: ResponseObserver<StreamingRecognizeResponse>?
+
+        var responseObserver: ResponseObserver<StreamingRecognizeResponse>? = null
         try {
             client = SpeechClient.create()
             sessionsClient = SessionsClient.create()
             textToSpeechClient = TextToSpeechClient.create()
-
             // Set the session name using the sessionId (UUID) and projectID (my-project-id)
             session = SessionName.of("vocalinterface", "123456789098765")
             println("Session Path: " + session!!.toString())
@@ -245,6 +212,7 @@ class VocalInterface {
 
                         if (alternative.confidence > 0.5) {
                             textDetected = alternative.transcript
+
                         }
                     } catch (e: Exception) {
                         println(e)
@@ -257,7 +225,7 @@ class VocalInterface {
                 }
 
                 override fun onError(t: Throwable) {
-                    //println("pingu")
+                    println("pingu")
                     println(t)
                 }
             }
@@ -327,124 +295,16 @@ class VocalInterface {
         } catch (e: Exception) {
             println(e)
         }
+
     }
 }
 
 
-fun main(){
+fun main(args : Array<String>){
     try {
-        VocalInterface().infiniteStreamingRecognize()
+        VocalInterface().infiniteStreamingRecognize();
     } catch (e: Exception) {
         println("Exception caught: $e")
     }
-}
-
-fun synthesizeAndSend(queryResult: QueryResult, textToSpeechClient: TextToSpeechClient?) {
-    try {
-        // Set the text input to be synthesized
-        val input = SynthesisInput.newBuilder()
-            .setText(queryResult.fulfillmentText)
-            .build()
-
-        // Build the voice request, select the language code ("en-US") and the ssml voice gender
-        // ("neutral")
-        val voice = VoiceSelectionParams.newBuilder()
-            .setLanguageCode("en-GB")
-            .setName("en-GB-Wavenet-C")
-            .setSsmlGender(SsmlVoiceGender.FEMALE)
-            .build()
-
-        // Select the type of audio file you want returned
-        val audioConfig = AudioConfig.newBuilder()
-            .setAudioEncoding(AudioEncoding.LINEAR16)
-            .build()
-
-        // Perform the text-to-speech request on the text input with the selected voice parameters and
-        // audio file type
-        val responseTTS = textToSpeechClient?.synthesizeSpeech(input, voice, audioConfig)
-
-        // Get the audio contents from the response
-        val audioContents = responseTTS?.audioContent
-
-        // Open the socket connection
-        val serverSocket = ServerSocket(8450)
-
-        //Wait until the the connection is established
-        val socketSota = serverSocket.accept()
-
-        //Generate the Output Streaming
-        val socketOut = DataOutputStream(socketSota.getOutputStream())
-
-        //Send via socket protocol the size of the Audio Synthesized
-        socketOut.writeInt(audioContents?.toByteArray()!!.size)
-
-        //Send via socket protocol the audio file
-        socketOut.write(audioContents.toByteArray(), 0, audioContents.toByteArray()!!.size)
-
-        //Close the socket connection
-        serverSocket.close()
-
-        /**To reproduce the Synthesized Speech also Here*/
-        //TODO("TO BE REMOVED - USELESS")
-            val out = FileOutputStream("output.wav")
-            out.write(audioContents.toByteArray())
-            val file = File(System.getProperty("user.dir") + "/output.wav")
-
-            val stream = AudioSystem.getAudioInputStream(file)
-            val format = stream.format
-            val info = DataLine.Info(Clip::class.java, format)
-            val clip = AudioSystem.getLine(info) as Clip
-            clip.open(stream)
-            clip.start()
-            while (clip.microsecondLength != clip.microsecondPosition) { }
-
-    } catch (e: Exception) {
-        println(e)
-    }
-}
-
-fun printQuery(queryResult: QueryResult) {
-    println("====================")
-    System.out.format("Query Text: '%s'\n", queryResult.queryText)
-    System.out.format( "Detected Intent: %s (confidence: %f)\n",
-        queryResult.intent.displayName, queryResult.intentDetectionConfidence )
-    System.out.format("Fulfillment Text: '%s'\n", queryResult.fulfillmentText)
-}
-
-
-fun catchSotaIP(queryResult: QueryResult) {
 
 }
-
-fun publicIP() {
-    val url = URL("http://checkip.amazonaws.com/")
-    val br = BufferedReader(InputStreamReader(url.openStream()))
-    val docRef = firestoreDB!!.collection("Home").document("VocalInterface")
-    val future = docRef.update("hasIP", br.readLine().toString())
-    val result = future.get()
-}
-
-
-fun initDB() {
-    // Fetch the service account key JSON file contents
-    val serviceAccount = FileInputStream("/Users/tommasaso/Documents/Tesi/IntalliJ/vocalinterface-firebase-adminsdk-3ycvz-8068c39321.json")
-
-    // Initialize the app with a service account, granting admin privileges
-    val options = FirebaseOptions.Builder()
-        .setCredentials(GoogleCredentials.fromStream(serviceAccount))
-        .setDatabaseUrl("https://vocalinterface.firebaseio.com")
-        .setStorageBucket("vocalinterface.appspot.com")
-        .build()
-    // Initialize app for RealtimeDB
-    FirebaseApp.initializeApp(options)
-
-    val optionsFirestore = FirestoreOptions
-        .newBuilder()
-        .setTimestampsInSnapshotsEnabled(true)
-        .build()
-
-    database = FirebaseDatabase.getInstance()
-
-    firestoreDB = optionsFirestore.service
-}
-

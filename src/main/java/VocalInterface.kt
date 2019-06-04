@@ -84,7 +84,7 @@ class VocalInterface {
                 println("checking response and event ")
                 while (true) {
                     if (!textDetected.isEmpty()) {
-                        val textInput = TextInput.newBuilder().setText(textDetected).setLanguageCode("en-US")
+                        val textInput = TextInput.newBuilder().setText(textDetected).setLanguageCode(currentLanguage)
 
                         // Build the query with the TextInput
                         val queryInput = QueryInput.newBuilder().setText(textInput).build()
@@ -105,7 +105,7 @@ class VocalInterface {
                         textDetected = ""
 
                     } else if (!eventName.isEmpty()) {
-                        val event = EventInput.newBuilder().setName(eventName+"_event").setLanguageCode("en-US").build()
+                        val event = EventInput.newBuilder().setName(eventName+"_event").setLanguageCode(currentLanguage).build()
 
                         val queryInput = QueryInput.newBuilder().setEvent(event).build()
 
@@ -234,7 +234,7 @@ class VocalInterface {
 
             val recognitionConfig = RecognitionConfig.newBuilder()
                 .setEncoding(RecognitionConfig.AudioEncoding.LINEAR16)
-                .setLanguageCode("en-US")
+                .setLanguageCode(currentLanguage)
                 .setSampleRateHertz(16000)
                 .build()
             val streamingRecognitionConfig =

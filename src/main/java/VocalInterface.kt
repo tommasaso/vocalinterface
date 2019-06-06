@@ -26,13 +26,15 @@ import com.google.firebase.cloud.StorageClient
 import com.google.firebase.database.*
 
 import java.io.*
+import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
 
 var firestoreDB: Firestore? = null
 var database: FirebaseDatabase? = null
-var currentLanguage = "it-IT" //or en-US
+var currentLanguage = "en-US" //or en-US
+var sotaIP = "172.20.31.185"
 
 class VocalInterface {
     // Creating shared object
@@ -47,7 +49,6 @@ class VocalInterface {
     private var session: SessionName? = null
     private var eventName = ""
     private var userId = "/installation_test_name/5fe6b3ba-2767-4669-ae69-6fdc402e695e"
-    private var sotaIP = "172.20.31.185"
     private var sotaPort = 9000
 
     /** Performs infinite streaming speech recognition  */
@@ -140,12 +141,12 @@ class VocalInterface {
             }
         }
 
-        initDB()
-        publicIP()
-        println("ciao")
+
+
         //init
         var noConncted = true
         var clientSocket:Socket? = null
+
 
         //wait until the socket connection is established
         while(noConncted) {
@@ -334,6 +335,8 @@ class VocalInterface {
 
 fun main(){
     try {
+        initDB()
+        initIP()
         VocalInterface().infiniteStreamingRecognize()
     } catch (e: Exception) {
         println("Exception caught: $e")
@@ -415,10 +418,6 @@ fun printQuery(queryResult: QueryResult) {
 }
 
 
-fun catchSotaIP(queryResult: QueryResult) {
-
-}
-
 fun publicIP() {
     val url = URL("http://checkip.amazonaws.com/")
     val br = BufferedReader(InputStreamReader(url.openStream()))
@@ -429,6 +428,7 @@ fun publicIP() {
 
 
 fun initDB() {
+
     // Fetch the service account key JSON file contents
     val serviceAccount = FileInputStream("/Users/tommasaso/Documents/Tesi/IntalliJ/vocalinterface-firebase-adminsdk-3ycvz-8068c39321.json")
 
@@ -450,4 +450,50 @@ fun initDB() {
 
     firestoreDB = optionsFirestore.service
 }
+fun initIP(){
+    var localSotaIP = ""
+    val myIP = getIP()
+    if (myIP != ""){
+        database!!.getReference().child("installation_test_name/VocalInterface/ViHasIP").setValueAsync(myIP)
+    }else{
+        println("Error int the IP acquisition")
+    }
+
+    database!!.getReference().child("installation_test_name/VocalInterface/SotaHasIP").addListenerForSingleValueEvent(object :ValueEventListener{
+        override fun onDataChange(dataSnapshot: DataSnapshot) {
+            val end = System.currentTimeMillis() + 10000
+
+            do {
+                localSotaIP = dataSnapshot.value.toString()
+                if (System.currentTimeMillis() > end) {
+                    break
+                }
+            }while (sotaIP.equals(""))
+            println("SotaIP: $sotaIP")
+            sotaIP = localSotaIP
+        }
+        override fun onCancelled(error: DatabaseError) {
+            println("Error in the Sota's IP acquisition")
+        }
+    })
+}
+
+fun getIP():String{
+    val n = NetworkInterface.getNetworkInterfaces()
+    while (n.hasMoreElements()) { //for each interface
+        val e = n.nextElement()
+        val a = e.inetAddresses
+        while (a.hasMoreElements()) {
+            val addr = a.nextElement()
+            val add = addr.hostAddress.toString()
+            if(e.name == "en0" && add.length < 17){
+                println("IPv4 Address: $add")
+                return add
+            }
+        }
+    }
+    return ""
+}
+
+
 

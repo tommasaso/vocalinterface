@@ -76,7 +76,7 @@ class VocalInterface {
                     val data = ByteArray(6400)
                     val bais = ByteArrayInputStream(data)
                     val ais = AudioInputStream(bais, format, data.size.toLong())
-                    var bytesRead = ais.read(data)
+                    val bytesRead = ais.read(data)
                     if (bytesRead != -1) {
                         socketIn.readFully(data, 0, data.size)
                         speakers.write(data, 0, data.size)
@@ -233,6 +233,7 @@ class VocalInterface {
 
             responseObserver = object : ResponseObserver<StreamingRecognizeResponse> {
 
+
                 override fun onStart(controller: StreamController) {}
 
                 override fun onResponse(response: StreamingRecognizeResponse) {
@@ -263,6 +264,8 @@ class VocalInterface {
                     println(t)
                 }
             }
+
+
 
             clientStream = client!!.streamingRecognizeCallable().splitCall(responseObserver)
 
@@ -345,6 +348,11 @@ fun main(){
 
 fun synthesizeAndSend(queryResult: QueryResult, textToSpeechClient: TextToSpeechClient?) {
     try {
+    if(queryResult.fulfillmentText != "") {
+        // Send to Sota if DialogFlow found an intent
+        val understood = !queryResult.intent.isFallback
+
+
         // Set the text input to be synthesized
         val input = SynthesisInput.newBuilder()
             .setText(queryResult.fulfillmentText)
@@ -356,13 +364,14 @@ fun synthesizeAndSend(queryResult: QueryResult, textToSpeechClient: TextToSpeech
             //.setLanguageCode("en-GB")
             //.setName("en-GB-Wavenet-C")
             .setLanguageCode(currentLanguage)
-            .setName(currentLanguage+"-Wavenet-A")
+            .setName(currentLanguage + "-Wavenet-F")
             .setSsmlGender(SsmlVoiceGender.FEMALE)
             .build()
 
         // Select the type of audio file you want returned
         val audioConfig = AudioConfig.newBuilder()
             .setAudioEncoding(AudioEncoding.LINEAR16)
+            .setPitch(5.5)
             .build()
 
         // Perform the text-to-speech request on the text input with the selected voice parameters and
@@ -387,22 +396,27 @@ fun synthesizeAndSend(queryResult: QueryResult, textToSpeechClient: TextToSpeech
         //Send via socket protocol the audio file
         socketOut.write(audioContents.toByteArray(), 0, audioContents.toByteArray()!!.size)
 
+        //Send via socket protocol if the sentence was understood
+        socketOut.writeBoolean(understood)
+
         //Close the socket connection
         serverSocket.close()
 
         /**To reproduce the Synthesized Speech also Here*/
         //TODO("TO BE REMOVED - USELESS")
-            val out = FileOutputStream("output.wav")
-            out.write(audioContents.toByteArray())
-            val file = File(System.getProperty("user.dir") + "/output.wav")
+        val out = FileOutputStream("output.wav")
+        out.write(audioContents.toByteArray())
+        val file = File(System.getProperty("user.dir") + "/output.wav")
 
-            val stream = AudioSystem.getAudioInputStream(file)
-            val format = stream.format
-            val info = DataLine.Info(Clip::class.java, format)
-            val clip = AudioSystem.getLine(info) as Clip
-            clip.open(stream)
-            clip.start()
-            while (clip.microsecondLength != clip.microsecondPosition) { }
+        val stream = AudioSystem.getAudioInputStream(file)
+        val format = stream.format
+        val info = DataLine.Info(Clip::class.java, format)
+        val clip = AudioSystem.getLine(info) as Clip
+        clip.open(stream)
+        clip.start()
+        while (clip.microsecondLength != clip.microsecondPosition) {
+        }
+    }
 
     } catch (e: Exception) {
         println(e)

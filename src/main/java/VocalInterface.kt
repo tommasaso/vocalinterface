@@ -34,7 +34,7 @@ import java.net.URL
 var firestoreDB: Firestore? = null
 var database: FirebaseDatabase? = null
 var currentLanguage = "en-US" //or en-US
-var sotaIP = "172.20.31.185"
+var sotaIP = ""
 
 class VocalInterface {
     // Creating shared object
@@ -49,7 +49,7 @@ class VocalInterface {
     private var session: SessionName? = null
     private var eventName = ""
     private var userId = "/installation_test_name/5fe6b3ba-2767-4669-ae69-6fdc402e695e"
-    private var sotaPort = 9000
+    private var sotaPort = 8600
 
     /** Performs infinite streaming speech recognition  */
     @Throws(Exception::class)
@@ -382,7 +382,7 @@ fun synthesizeAndSend(queryResult: QueryResult, textToSpeechClient: TextToSpeech
         val audioContents = responseTTS?.audioContent
 
         // Open the socket connection
-        val serverSocket = ServerSocket(8450)
+        val serverSocket = ServerSocket(9000);//8600)
 
         //Wait until the the connection is established
         val socketSota = serverSocket.accept()
@@ -473,23 +473,26 @@ fun initIP(){
         println("Error int the IP acquisition")
     }
 
-    database!!.getReference().child("installation_test_name/VocalInterface/SotaHasIP").addListenerForSingleValueEvent(object :ValueEventListener{
-        override fun onDataChange(dataSnapshot: DataSnapshot) {
-            val end = System.currentTimeMillis() + 10000
+    val end = System.currentTimeMillis() + 60000
+    do {
+        Thread.sleep(500)
+        database!!.getReference().child("installation_test_name/VocalInterface/SotaHasIP").addListenerForSingleValueEvent(object :ValueEventListener{
+            override fun onDataChange(dataSnapshot: DataSnapshot) {
 
-            do {
-                localSotaIP = dataSnapshot.value.toString()
-                if (System.currentTimeMillis() > end) {
-                    break
-                }
-            }while (sotaIP.equals(""))
-            println("SotaIP: $sotaIP")
-            sotaIP = localSotaIP
+                    localSotaIP = dataSnapshot.value.toString()
+
+            }
+            override fun onCancelled(error: DatabaseError) {
+                println("Error in the Sota's IP acquisition")
+            }
+        })
+        if (System.currentTimeMillis() > end) {
+            break
         }
-        override fun onCancelled(error: DatabaseError) {
-            println("Error in the Sota's IP acquisition")
-        }
-    })
+    }while (localSotaIP == "")
+    sotaIP = localSotaIP
+    println("SotaIP: $sotaIP")
+
 }
 
 fun getIP():String{

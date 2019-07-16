@@ -30,11 +30,17 @@ import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
+import java.util.*
+import kotlin.concurrent.thread
+import kotlin.system.exitProcess
 
+var eventName = ""
 var firestoreDB: Firestore? = null
 var database: FirebaseDatabase? = null
 var currentLanguage = "en-US" //or en-US
 var sotaIP = ""
+var textDetected = ""
+
 
 class VocalInterface {
     // Creating shared object
@@ -42,12 +48,12 @@ class VocalInterface {
     private var targetDataLine: TargetDataLine? = null
     @Volatile var speech: Boolean = false
     private var clientStream: ClientStream<StreamingRecognizeRequest>? = null
-    @Volatile private var textDetected = ""
+    //@Volatile private var textDetected = ""
     private var sessionsClient: SessionsClient? = null
     @Volatile private var textToSpeechClient: TextToSpeechClient? = null
     private var client: SpeechClient? = null
     private var session: SessionName? = null
-    private var eventName = ""
+    //var eventName = ""
     private var userId = "/installation_test_name/5fe6b3ba-2767-4669-ae69-6fdc402e695e"
     private var sotaPort = 8600
 
@@ -93,6 +99,8 @@ class VocalInterface {
             override fun run() {
                 println("checking response and event ")
                 while (true) {
+                    Thread.sleep(100)
+                    //println("eventName = "+eventName)
                     if (!textDetected.isEmpty()) {
                         val textInput = TextInput.newBuilder().setText(textDetected).setLanguageCode(currentLanguage)
 
@@ -116,15 +124,18 @@ class VocalInterface {
                         textDetected = ""
 
                     } else if (!eventName.isEmpty()) {
+
                         val event = EventInput.newBuilder().setName(eventName+"_event").setLanguageCode(currentLanguage).build()
 
                         val queryInput = QueryInput.newBuilder().setEvent(event).build()
+                        println("queryInput: " + queryInput)
 
                         // Performs the detect intent request
                         val responseD = sessionsClient!!.detectIntent(session, queryInput)
 
                         // Display the query result
                         val queryResult = responseD.queryResult
+                        println("queryResult: " + queryResult)
 
                         try {
                             printQuery(queryResult)
@@ -140,8 +151,6 @@ class VocalInterface {
                 }
             }
         }
-
-
 
         //init
         var noConncted = true
@@ -265,8 +274,6 @@ class VocalInterface {
                 }
             }
 
-
-
             clientStream = client!!.streamingRecognizeCallable().splitCall(responseObserver)
 
             val recognitionConfig = RecognitionConfig.newBuilder()
@@ -338,6 +345,7 @@ class VocalInterface {
 
 fun main(){
     try {
+        simulation()
         initDB()
         initIP()
         VocalInterface().infiniteStreamingRecognize()
@@ -404,9 +412,12 @@ fun synthesizeAndSend(queryResult: QueryResult, textToSpeechClient: TextToSpeech
 
         /**To reproduce the Synthesized Speech also Here*/
         //TODO("TO BE REMOVED - USELESS")
-        val out = FileOutputStream("output.wav")
-        out.write(audioContents.toByteArray())
-        val file = File(System.getProperty("user.dir") + "/output.wav")
+
+        val rand = Random();
+        val number = rand.nextInt(50).toString()
+        val out = FileOutputStream(number+"-out.wav")//(queryResult.intent.displayName+".wav")
+        out.write(audioContents?.toByteArray())
+        val file = File(System.getProperty("user.dir") + "/"+number+"-out.wav")
 
         val stream = AudioSystem.getAudioInputStream(file)
         val format = stream.format
@@ -468,7 +479,7 @@ fun initIP(){
     var localSotaIP = ""
     val myIP = getIP()
     if (myIP != ""){
-        database!!.getReference().child("installation_test_name/VocalInterface/ViHasIP").setValueAsync(myIP)
+        database!!.getReference().child("VocalInterface/ViHasIP").setValueAsync(myIP)
     }else{
         println("Error int the IP acquisition")
     }
@@ -476,7 +487,7 @@ fun initIP(){
     val end = System.currentTimeMillis() + 60000
     do {
         Thread.sleep(500)
-        database!!.getReference().child("installation_test_name/VocalInterface/SotaHasIP").addListenerForSingleValueEvent(object :ValueEventListener{
+        database!!.getReference().child("VocalInterface/SotaHasIP").addListenerForSingleValueEvent(object :ValueEventListener{
             override fun onDataChange(dataSnapshot: DataSnapshot) {
 
                     localSotaIP = dataSnapshot.value.toString()
@@ -511,6 +522,35 @@ fun getIP():String{
     }
     return ""
 }
+
+fun simulation(){
+    thread(start = true){
+        println("simulation")
+
+        Thread.sleep(80000)
+        //Thread.sleep(7000)
+        eventName = "drugReminderFullStomach"
+        println("drugReminderFullStomach")
+
+        Thread.sleep(9000)
+        textDetected = "not yet"
+        println("confirmMedicineTakenLater")
+
+
+        Thread.sleep(80000)
+        eventName = "confirmMedicineTaken"
+        println("confirmMedicineTaken")
+
+
+        Thread.sleep(8000)
+        textDetected = "of course"
+        println("medicineTakenYes")
+
+
+    }
+
+}
+
 
 
 

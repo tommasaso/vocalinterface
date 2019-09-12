@@ -1,2 +1,3 @@
 # vocalinterface
-Vocal interface written in Java and using Google DialogFlow API
+
+This is the vocal interface, which handles the communication with Google's DialogFlow agent and at the same time the communication with the Sota robot. 
